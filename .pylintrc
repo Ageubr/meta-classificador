@@ -1,0 +1,57 @@
+[MASTER]
+# Use múltiplos processos para acelerar Pylint
+jobs=1
+
+# Não carrega plugins
+load-plugins=
+
+[MESSAGES CONTROL]
+# Desabilitar avisos menos importantes
+disable=
+    C0103,  # invalid-name (variáveis X, y são padrão em ML)
+    C0301,  # line-too-long (formatado por black/autopep8)
+    C0303,  # trailing-whitespace (formatado automaticamente)
+    C0304,  # missing-final-newline (formatado automaticamente)
+    C0411,  # wrong-import-order (imports funcionais são mais importantes)
+    C0413,  # wrong-import-position (necessário para sys.path)
+    C0415,  # import-outside-toplevel (às vezes necessário)
+    W0611,  # unused-import (pode ser usado em futuras versões)
+    W0612,  # unused-variable (útil para debugging)
+    W0621,  # redefined-outer-name (comum em fixtures pytest)
+    W0707,  # raise-missing-from (explícito vs implícito)
+    W0718,  # broad-exception-caught (útil para APIs)
+    W1203,  # logging-fstring-interpolation (mais legível)
+    W1514,  # unspecified-encoding (Python 3 usa UTF-8 por padrão)
+    R0913,  # too-many-arguments
+    R0914,  # too-many-locals
+
+[BASIC]
+# Permitir nomes de variáveis comuns em ML/Data Science
+good-names=i,j,k,x,y,X,y,df,ax,fig,id,_
+
+[FORMAT]
+# Máximo de caracteres por linha
+max-line-length=100
+
+# Máximo de linhas por módulo
+max-module-lines=1000
+
+[DESIGN]
+# Máximo de atributos por classe
+max-attributes=10
+
+# Máximo de argumentos por função
+max-args=8
+
+[REPORTS]
+# Simplificar output
+reports=no
+score=yes
+
+[TYPECHECK]
+# Módulos a serem ignorados para checagem de tipos
+ignored-modules=numpy,pandas,sklearn,xgboost
+
+[SIMILARITIES]
+# Mínimo de linhas similares
+min-similarity-lines=10

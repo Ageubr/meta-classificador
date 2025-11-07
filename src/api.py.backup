@@ -1,0 +1,460 @@
+"""
+API REST para o Sistema de Análise de Vulnerabilidade Social.
+
+Esta API fornece endpoints para análise de vulnerabilidade social
+usando modelos de Machine Learning e Large Language Models.
+"""
+
+from meta_classificador_llm import MetaClassificadorLLM
+from preprocessamento import (
+    gerar_features_vulnerabilidade,
+    preparar_dados_para_ml
+)
+from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
+import pandas as pd
+import numpy as np
+import sys
+from pathlib import Path
+import logging
+from datetime import datetime
+import joblib
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+API REST para o Sistema de Meta-Classificação de Vulnerabilidade Social
+Fornece endpoints para predições e análises usando FastAPI
+"""
+
+# Imports padrão
+import sys
+import logging
+from pathlib import Path
+from typing import List
+from datetime import datetime
+
+# Imports terceiros
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import pandas as pd
+
+# Adicionar o diretório src ao path
+sys.path.insert(0, str(Path(__file__).parent))
+
+# Imports locais
+from preprocessamento import gerar_features_vulnerabilidade, preparar_dados_para_ml
+from meta_classificador_llm import MetaClassificadorLLM
+
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Inicializar FastAPI
+app = FastAPI(
+    title="API de Análise de Vulnerabilidade Social",
+    description="API para classificação e análise de vulnerabilidade social usando ML e LLMs",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc")
+
+# Configurar CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Estado global da aplicação
+
+
+class AppState:
+    meta_classificador: Optional[MetaClassificadorLLM] = None
+    modelos_carregados: bool = False
+
+
+app_state = AppState()
+
+
+# Modelos Pydantic para request/response
+class PessoaInput(BaseModel):
+    """Modelo de entrada para dados de uma pessoa."""
+    nis: Optional[str] = Field(
+        None, description="Número de Identificação Social")
+    nome: Optional[str] = Field(None, description="Nome da pessoa")
+    idade: int = Field(..., ge=0, le=120, description="Idade em anos")
+    sexo: str = Field(..., description="Sexo (M/F)")
+    escolaridade: int = Field(..., ge=0, le=5,
+                              description="Nível de escolaridade (0-5)")
+    renda_familiar: float = Field(..., ge=0,
+                                  description="Renda familiar total")
+    qtd_pessoas_familia: int = Field(..., ge=1,
+                                     description="Quantidade de pessoas na família")
+    possui_deficiencia: int = Field(...,
+                                    ge=0,
+                                    le=1,
+                                    description="Possui deficiência (0/1)")
+    situacao_trabalho: int = Field(...,
+                                   ge=0,
+                                   le=2,
+                                   description="Situação de trabalho (0-2)")
+    tipo_moradia: int = Field(..., ge=1, le=4,
+                              description="Tipo de moradia (1-4)")
+    acesso_agua: int = Field(..., ge=0, le=1,
+                             description="Possui acesso à água (0/1)")
+    acesso_esgoto: int = Field(..., ge=0, le=1,
+                               description="Possui acesso ao esgoto (0/1)")
+    municipio: Optional[str] = Field(None, description="Município")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "nis": "12345678901",
+                "nome": "João Silva",
+                "idade": 35,
+                "sexo": "M",
+                "escolaridade": 2,
+                "renda_familiar": 800.0,
+                "qtd_pessoas_familia": 4,
+                "possui_deficiencia": 0,
+                "situacao_trabalho": 1,
+                "tipo_moradia": 1,
+                "acesso_agua": 1,
+                "acesso_esgoto": 1,
+                "municipio": "São Paulo"
+            }
+        }
+
+
+class PredictionResponse(BaseModel):
+    """Modelo de resposta para predições."""
+    vulnerabilidade_rf: str
+    vulnerabilidade_xgb: str
+    probabilidade_rf: dict
+    probabilidade_xgb: dict
+    features_importantes: dict
+    timestamp: str
+
+
+class AnaliseCompletaResponse(BaseModel):
+    """Modelo de resposta para análise completa."""
+    dados_pessoa: Dict[str,
+                       Any] = Field(...,
+                                    description="Dados da pessoa analisada")
+    predicoes_ml: Dict[str,
+                       Any] = Field(...,
+                                    description="Predições dos modelos ML")
+    analise_llm: Optional[str] = Field(
+        None, description="Análise detalhada do LLM")
+    recomendacoes: Optional[List[str]] = Field(
+        None, description="Recomendações de ações")
+    timestamp: str = Field(..., description="Timestamp da análise")
+
+
+class HealthResponse(BaseModel):
+    """Modelo de resposta para health check."""
+    status: str
+    timestamp: str
+    modelos_carregados: bool
+    versao: str
+
+
+# Funções auxiliares
+def carregar_modelos():
+    """Carrega modelos ML se ainda não carregados."""
+    if not app_state.modelos_carregados:
+        try:
+            logger.info("Carregando modelos ML...")
+            app_state.meta_classificador = MetaClassificadorLLM()
+            app_state.meta_classificador.carregar_modelos_ml()
+            app_state.modelos_carregados = True
+            logger.info("Modelos carregados com sucesso")
+        except Exception as e:
+            logger.error(f"Erro ao carregar modelos: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Erro ao carregar modelos: {str(e)}"
+            )
+
+
+def get_meta_classificador():
+    """Dependency para obter meta-classificador."""
+    carregar_modelos()
+    if app_state.meta_classificador is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Meta-classificador não disponível"
+        )
+    return app_state.meta_classificador
+
+
+# Endpoints
+@app.on_event("startup")
+async def startup_event():
+    """Carrega os modelos treinados na inicialização da API."""
+    global rf_model, xgb_model, feature_names, meta_classificador
+    import joblib
+
+    try:
+        # Carregar modelos treinados
+        modelos_dir = Path(__file__).parent.parent / "outputs"
+
+        rf_path = modelos_dir / "modelo_rf.pkl"
+        xgb_path = modelos_dir / "modelo_xgb.pkl"
+
+        if rf_path.exists():
+            rf_model = joblib.load(rf_path)
+            logging.info("Modelo Random Forest carregado com sucesso")
+        else:
+            logging.warning("Modelo RF não encontrado em %s", rf_path)
+
+        if xgb_path.exists():
+            xgb_model = joblib.load(xgb_path)
+            logging.info("Modelo XGBoost carregado com sucesso")
+        else:
+            logging.warning("Modelo XGBoost não encontrado em %s", xgb_path)
+
+        # Inicializar meta-classificador LLM
+        meta_classificador = MetaClassificadorLLM()
+        logging.info("Meta-classificador LLM inicializado")
+
+        logging.info("API iniciada com sucesso!")
+
+    except Exception as e:
+        logging.error("Erro ao carregar modelos: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Erro ao carregar modelos: {str(e)}"
+        ) from e
+
+
+@app.get("/", tags=["Root"])
+async def root():
+    """Endpoint raiz da API."""
+    return {
+        "mensagem": "API de Análise de Vulnerabilidade Social",
+        "versao": "1.0.0",
+        "documentacao": "/docs",
+        "health": "/health"
+    }
+
+
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
+async def health_check():
+    """Verifica o status de saúde da API."""
+    return HealthResponse(
+        status="healthy" if app_state.modelos_carregados else "degraded",
+        timestamp=datetime.now().isoformat(),
+        modelos_carregados=app_state.modelos_carregados,
+        versao="1.0.0"
+    )
+
+
+@app.get("/models", tags=["Models"])
+async def listar_modelos():
+    """Lista modelos disponíveis na API."""
+    carregar_modelos()
+
+    modelos_disponiveis = list(app_state.meta_classificador.modelos_ml.keys(
+    )) if app_state.meta_classificador else []
+
+    return {
+        "modelos_ml": modelos_disponiveis,
+        "meta_classificador": "Meta-Classificador com LLM" if app_state.meta_classificador else None,
+        "total": len(modelos_disponiveis)}
+
+
+@app.post("/predict", response_model=PredicaoResponse, tags=["Predictions"])
+async def predizer_vulnerabilidade(
+    pessoa: PessoaInput,
+    meta_classificador: MetaClassificadorLLM = Depends(get_meta_classificador)
+):
+    """
+    Prediz o nível de vulnerabilidade para uma pessoa.
+
+    Usa apenas modelos de ML para predição rápida.
+    """
+    try:
+        # Converter entrada para DataFrame
+        dados_dict = pessoa.dict()
+        df = pd.DataFrame([dados_dict])
+
+        # Gerar features de vulnerabilidade
+        df_features = gerar_features_vulnerabilidade(df)
+
+        # Preparar features para ML
+        X, _ = preparar_dados_para_ml(df_features)
+
+        # Fazer predição com modelos ML
+        predicoes_ml = meta_classificador.predizer_modelos_ml(X)
+
+        # Usar Random Forest como modelo principal
+        rf_pred = predicoes_ml.get('random_forest', {})
+        classe_pred = rf_pred.get('classes', [0])[0]
+        proba = rf_pred.get('probabilidades', [[0.25, 0.25, 0.25, 0.25]])[0]
+
+        niveis = {0: 'Baixa', 1: 'Média', 2: 'Alta', 3: 'Muito Alta'}
+
+        return PredicaoResponse(
+            nivel_vulnerabilidade=niveis[classe_pred],
+            confianca=float(max(proba)),
+            probabilidades={
+                'Baixa': float(proba[0]),
+                'Média': float(proba[1]),
+                'Alta': float(proba[2]),
+                'Muito Alta': float(proba[3])
+            },
+            features_importantes=None,
+            timestamp=datetime.now().isoformat()
+        )
+
+    except Exception as e:
+        logger.error(f"Erro na predição: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao processar predição: {str(e)}"
+        )
+
+
+@app.post("/analyze",
+          response_model=AnaliseCompletaResponse,
+          tags=["Analysis"])
+async def analisar_vulnerabilidade(
+    pessoa: PessoaInput,
+    usar_llm: bool = False,
+    meta_classificador: MetaClassificadorLLM = Depends(get_meta_classificador)
+):
+    """
+    Realiza análise completa de vulnerabilidade social.
+
+    Se usar_llm=True, inclui análise detalhada com LLM (mais lento).
+    """
+    try:
+        # Converter entrada para Series
+        dados_dict = pessoa.dict()
+        pessoa_series = pd.Series(dados_dict)
+
+        # Se não usar LLM, apenas fazer predições ML
+        if not usar_llm:
+            # Converter para DataFrame para gerar features
+            df = pd.DataFrame([dados_dict])
+            df_features = gerar_features_vulnerabilidade(df)
+            X, _ = preparar_dados_para_ml(df_features)
+
+            predicoes_ml = meta_classificador.predizer_modelos_ml(X)
+
+            return AnaliseCompletaResponse(
+                dados_pessoa=dados_dict,
+                predicoes_ml=predicoes_ml,
+                analise_llm=None,
+                recomendacoes=None,
+                timestamp=datetime.now().isoformat()
+            )
+        else:
+            # Análise completa com LLM
+            resultado = meta_classificador.classificar_vulnerabilidade(
+                pessoa_series)
+
+            return AnaliseCompletaResponse(
+                dados_pessoa=resultado['dados_pessoa'],
+                predicoes_ml=resultado['predicoes_ml'],
+                analise_llm=resultado.get('analise_llm'),
+                recomendacoes=None,  # Pode ser extraído da análise LLM
+                timestamp=resultado['timestamp']
+            )
+
+    except Exception as e:
+        logger.error(f"Erro na análise: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao processar análise: {str(e)}"
+        )
+
+
+@app.post("/predict-batch", tags=["Predictions"])
+async def predizer_lote(
+    pessoas: List[PessoaInput],
+    meta_classificador: MetaClassificadorLLM = Depends(get_meta_classificador)
+):
+    """
+    Prediz vulnerabilidade para múltiplas pessoas.
+
+    Processamento em lote para maior eficiência.
+    """
+    try:
+        if len(pessoas) > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Máximo de 100 pessoas por requisição"
+            )
+
+        resultados = []
+
+        for pessoa in pessoas:
+            dados_dict = pessoa.dict()
+            df = pd.DataFrame([dados_dict])
+            df_features = gerar_features_vulnerabilidade(df)
+            X, _ = preparar_dados_para_ml(df_features)
+
+            predicoes_ml = meta_classificador.predizer_modelos_ml(X)
+
+            rf_pred = predicoes_ml.get('random_forest', {})
+            classe_pred = rf_pred.get('classes', [0])[0]
+            proba = rf_pred.get('probabilidades', [
+                                [0.25, 0.25, 0.25, 0.25]])[0]
+
+            niveis = {0: 'Baixa', 1: 'Média', 2: 'Alta', 3: 'Muito Alta'}
+
+            resultados.append({
+                'nis': dados_dict.get('nis'),
+                'nome': dados_dict.get('nome'),
+                'nivel_vulnerabilidade': niveis[classe_pred],
+                'confianca': float(max(proba))
+            })
+
+        return {
+            'total': len(resultados),
+            'resultados': resultados,
+            'timestamp': datetime.now().isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro no processamento em lote: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao processar lote: {str(e)}"
+        )
+
+
+@app.get("/stats", tags=["Statistics"])
+async def estatisticas_api():
+    """Retorna estatísticas de uso da API."""
+    return {
+        "total_requisicoes": 0,  # Implementar contador
+        "modelos_carregados": app_state.modelos_carregados,
+        "uptime": "N/A",  # Implementar cálculo de uptime
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "api:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

@@ -21,7 +21,8 @@ try:
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
-    logging.warning("OpenAI não está instalado. Funcionalidades de LLM não estarão disponíveis.")
+    logging.warning(
+        "OpenAI não está instalado. Funcionalidades de LLM não estarão disponíveis.")
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -33,11 +34,14 @@ class MetaClassificadorLLM:
     Meta-classificador que combina modelos ML tradicionais com LLM para
     análise mais interpretável de vulnerabilidade social.
     """
-    
-    def __init__(self, api_key: Optional[str] = None, modelo_llm: str = "gpt-3.5-turbo"):
+
+    def __init__(
+            self,
+            api_key: Optional[str] = None,
+            modelo_llm: str = "gpt-3.5-turbo"):
         """
         Inicializa o meta-classificador.
-        
+
         Args:
             api_key (str, optional): Chave da API OpenAI. Se None, tentará obter de variável de ambiente.
             modelo_llm (str): Modelo do LLM a ser usado
@@ -46,7 +50,7 @@ class MetaClassificadorLLM:
         self.client = None
         self.modelos_ml = {}
         self.historico_predicoes = []
-        
+
         # Configurar cliente OpenAI
         if OPENAI_AVAILABLE:
             api_key = api_key or os.getenv('OPENAI_API_KEY')
@@ -54,85 +58,91 @@ class MetaClassificadorLLM:
                 self.client = OpenAI(api_key=api_key)
                 logger.info("Cliente OpenAI configurado com sucesso")
             else:
-                logger.warning("Chave da API OpenAI não encontrada. Defina OPENAI_API_KEY como variável de ambiente.")
-        
+                logger.warning(
+                    "Chave da API OpenAI não encontrada. Defina OPENAI_API_KEY como variável de ambiente.")
+
     def carregar_modelos_ml(self, pasta_modelos: str = "outputs/modelos"):
         """
         Carrega modelos ML pré-treinados.
-        
+
         Args:
             pasta_modelos (str): Pasta contendo os modelos salvos
         """
         try:
             import joblib
-            
+
             # Carregar Random Forest
             rf_path = f"{pasta_modelos}/random_forest_vulnerabilidade.pkl"
             if Path(rf_path).exists():
                 self.modelos_ml['random_forest'] = joblib.load(rf_path)
                 logger.info("Modelo Random Forest carregado")
-            
+
             # Carregar XGBoost
             xgb_path = f"{pasta_modelos}/xgboost_vulnerabilidade.pkl"
             if Path(xgb_path).exists():
                 self.modelos_ml['xgboost'] = joblib.load(xgb_path)
                 logger.info("Modelo XGBoost carregado")
-                
+
         except Exception as e:
             logger.error(f"Erro ao carregar modelos ML: {e}")
-    
+
     def predizer_modelos_ml(self, X: pd.DataFrame) -> Dict[str, Any]:
         """
         Faz predições usando modelos ML carregados.
-        
+
         Args:
             X (pd.DataFrame): Features de entrada
-            
+
         Returns:
             Dict[str, Any]: Predições e probabilidades dos modelos
         """
         predicoes = {}
-        
+
         for nome_modelo, modelo_data in self.modelos_ml.items():
             try:
                 modelo = modelo_data['modelo']
                 scaler = modelo_data['scaler']
-                
+
                 # Escalar dados
                 X_scaled = scaler.transform(X)
-                
+
                 # Fazer predições
                 pred_classes = modelo.predict(X_scaled)
                 pred_proba = modelo.predict_proba(X_scaled)
-                
+
                 predicoes[nome_modelo] = {
                     'classes': pred_classes.tolist(),
                     'probabilidades': pred_proba.tolist(),
                     'confianca_maxima': pred_proba.max(axis=1).tolist()
                 }
-                
+
             except Exception as e:
                 logger.error(f"Erro ao fazer predição com {nome_modelo}: {e}")
-        
+
         return predicoes
-    
-    def gerar_prompt_vulnerabilidade(self, dados_pessoa: Dict[str, Any], predicoes_ml: Dict[str, Any]) -> str:
+
+    def gerar_prompt_vulnerabilidade(
+            self, dados_pessoa: Dict[str, Any], predicoes_ml: Dict[str, Any]) -> str:
         """
         Gera prompt para o LLM analisar vulnerabilidade social.
-        
+
         Args:
             dados_pessoa (Dict): Dados da pessoa a ser analisada
             predicoes_ml (Dict): Predições dos modelos ML
-            
+
         Returns:
             str: Prompt formatado para o LLM
         """
-        
+
         # Mapear níveis de vulnerabilidade
-        niveis_vulnerabilidade = {0: 'Baixa', 1: 'Média', 2: 'Alta', 3: 'Muito Alta'}
-        
+        niveis_vulnerabilidade = {
+            0: 'Baixa',
+            1: 'Média',
+            2: 'Alta',
+            3: 'Muito Alta'}
+
         prompt = f"""
-Você é um especialista em análise de vulnerabilidade social e políticas públicas. 
+Você é um especialista em análise de vulnerabilidade social e políticas públicas.
 Analise o perfil socioeconômico a seguir e forneça uma avaliação detalhada da vulnerabilidade social.
 
 DADOS DA PESSOA:
@@ -154,10 +164,13 @@ PREDIÇÕES DOS MODELOS DE MACHINE LEARNING:
 
         for nome_modelo, pred in predicoes_ml.items():
             if pred['classes']:
-                nivel_pred = niveis_vulnerabilidade.get(pred['classes'][0], 'Desconhecido')
-                confianca = pred['confianca_maxima'][0] * 100 if pred['confianca_maxima'] else 0
-                prompt += f"- {nome_modelo}: {nivel_pred} (confiança: {confianca:.1f}%)\n"
-        
+                nivel_pred = niveis_vulnerabilidade.get(
+                    pred['classes'][0], 'Desconhecido')
+                confianca = pred['confianca_maxima'][0] * \
+                    100 if pred['confianca_maxima'] else 0
+                prompt += f"- {nome_modelo}: {nivel_pred} (confiança: {
+                    confianca:.1f}%)\n"
+
         prompt += """
 Por favor, forneça uma análise estruturada contendo:
 
@@ -184,23 +197,23 @@ Por favor, forneça uma análise estruturada contendo:
 
 Seja específico, prático e considere o contexto socioeconômico brasileiro.
 """
-        
+
         return prompt
-    
+
     def analisar_com_llm(self, prompt: str) -> Optional[str]:
         """
         Envia prompt para o LLM e retorna a análise.
-        
+
         Args:
             prompt (str): Prompt para o LLM
-            
+
         Returns:
             Optional[str]: Resposta do LLM ou None se erro
         """
         if not self.client:
             logger.error("Cliente OpenAI não configurado")
             return None
-        
+
         try:
             response = self.client.chat.completions.create(
                 model=self.modelo_llm,
@@ -211,36 +224,37 @@ Seja específico, prático e considere o contexto socioeconômico brasileiro.
                 max_tokens=1500,
                 temperature=0.3
             )
-            
+
             return response.choices[0].message.content
-            
+
         except Exception as e:
             logger.error(f"Erro ao chamar OpenAI API: {e}")
             return None
-    
-    def classificar_vulnerabilidade(self, dados_pessoa: pd.Series) -> Dict[str, Any]:
+
+    def classificar_vulnerabilidade(
+            self, dados_pessoa: pd.Series) -> Dict[str, Any]:
         """
         Classifica vulnerabilidade combinando ML e LLM.
-        
+
         Args:
             dados_pessoa (pd.Series): Dados da pessoa
-            
+
         Returns:
             Dict[str, Any]: Análise completa de vulnerabilidade
         """
         # Converter para DataFrame para compatibilidade com modelos
         X = pd.DataFrame([dados_pessoa])
-        
+
         # Obter predições dos modelos ML
         predicoes_ml = self.predizer_modelos_ml(X)
-        
+
         # Preparar dados para o LLM
         dados_dict = dados_pessoa.to_dict()
-        
+
         # Gerar análise com LLM
         prompt = self.gerar_prompt_vulnerabilidade(dados_dict, predicoes_ml)
         analise_llm = self.analisar_com_llm(prompt)
-        
+
         # Consolidar resultado
         resultado = {
             'dados_pessoa': dados_dict,
@@ -249,50 +263,54 @@ Seja específico, prático e considere o contexto socioeconômico brasileiro.
             'prompt_usado': prompt,
             'timestamp': pd.Timestamp.now().isoformat()
         }
-        
+
         # Salvar no histórico
         self.historico_predicoes.append(resultado)
-        
+
         return resultado
-    
-    def analisar_lote(self, df: pd.DataFrame, salvar_resultados: bool = True) -> List[Dict[str, Any]]:
+
+    def analisar_lote(self, df: pd.DataFrame,
+                      salvar_resultados: bool = True) -> List[Dict[str, Any]]:
         """
         Analisa um lote de pessoas.
-        
+
         Args:
             df (pd.DataFrame): DataFrame com dados das pessoas
             salvar_resultados (bool): Se deve salvar resultados em arquivo
-            
+
         Returns:
             List[Dict[str, Any]]: Lista com análises de cada pessoa
         """
         logger.info(f"Iniciando análise de lote com {len(df)} registros")
-        
+
         resultados = []
-        
+
         for idx, row in df.iterrows():
             try:
                 resultado = self.classificar_vulnerabilidade(row)
                 resultados.append(resultado)
-                
+
                 if (idx + 1) % 10 == 0:
                     logger.info(f"Processados {idx + 1}/{len(df)} registros")
-                    
+
             except Exception as e:
                 logger.error(f"Erro ao processar registro {idx}: {e}")
                 continue
-        
+
         # Salvar resultados se solicitado
         if salvar_resultados:
             self.salvar_resultados_lote(resultados)
-        
-        logger.info(f"Análise de lote concluída: {len(resultados)} registros processados")
+
+        logger.info(
+            f"Análise de lote concluída: {
+                len(resultados)} registros processados")
         return resultados
-    
-    def salvar_resultados_lote(self, resultados: List[Dict[str, Any]], caminho: str = None):
+
+    def salvar_resultados_lote(
+            self, resultados: List[Dict[str, Any]], caminho: str = None):
         """
         Salva resultados de análise em lote.
-        
+
         Args:
             resultados (List[Dict]): Lista de resultados
             caminho (str, optional): Caminho para salvar. Se None, usa timestamp.
@@ -300,55 +318,59 @@ Seja específico, prático e considere o contexto socioeconômico brasileiro.
         if not caminho:
             timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
             caminho = f"outputs/analise_vulnerabilidade_{timestamp}.json"
-        
+
         # Criar pasta se não existir
         Path(caminho).parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Salvar resultados
         with open(caminho, 'w', encoding='utf-8') as f:
             json.dump(resultados, f, indent=2, ensure_ascii=False, default=str)
-        
+
         logger.info(f"Resultados salvos em {caminho}")
-    
-    def gerar_relatorio_consolidado(self, resultados: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+    def gerar_relatorio_consolidado(
+            self, resultados: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Gera relatório consolidado das análises.
-        
+
         Args:
             resultados (List[Dict]): Lista de resultados das análises
-            
+
         Returns:
             Dict[str, Any]: Relatório consolidado
         """
         if not resultados:
             return {}
-        
+
         # Extrair predições ML para estatísticas
         predicoes_rf = []
         predicoes_xgb = []
-        
+
         for resultado in resultados:
             pred_ml = resultado.get('predicoes_ml', {})
-            
+
             if 'random_forest' in pred_ml:
-                predicoes_rf.extend(pred_ml['random_forest'].get('classes', []))
-            
+                predicoes_rf.extend(
+                    pred_ml['random_forest'].get(
+                        'classes', []))
+
             if 'xgboost' in pred_ml:
                 predicoes_xgb.extend(pred_ml['xgboost'].get('classes', []))
-        
+
         # Mapeamento de níveis
         niveis = {0: 'Baixa', 1: 'Média', 2: 'Alta', 3: 'Muito Alta'}
-        
+
         relatorio = {
             'total_analisados': len(resultados),
             'distribuicao_vulnerabilidade': {
-                'random_forest': {niveis[i]: predicoes_rf.count(i) for i in range(4) if i in predicoes_rf} if predicoes_rf else {},
-                'xgboost': {niveis[i]: predicoes_xgb.count(i) for i in range(4) if i in predicoes_xgb} if predicoes_xgb else {}
-            },
-            'analises_llm_realizadas': sum(1 for r in resultados if r.get('analise_llm')),
-            'timestamp_relatorio': pd.Timestamp.now().isoformat()
-        }
-        
+                'random_forest': {
+                    niveis[i]: predicoes_rf.count(i) for i in range(4) if i in predicoes_rf} if predicoes_rf else {},
+                'xgboost': {
+                    niveis[i]: predicoes_xgb.count(i) for i in range(4) if i in predicoes_xgb} if predicoes_xgb else {}},
+            'analises_llm_realizadas': sum(
+                1 for r in resultados if r.get('analise_llm')),
+            'timestamp_relatorio': pd.Timestamp.now().isoformat()}
+
         return relatorio
 
 
@@ -357,7 +379,7 @@ def exemplo_uso_simples():
     Exemplo simples de uso do meta-classificador (sem OpenAI).
     """
     print("=== Exemplo de Uso do Meta-Classificador (Modo Simulação) ===")
-    
+
     # Simular dados de uma pessoa
     dados_exemplo = pd.Series({
         'idade': 35,
@@ -373,10 +395,10 @@ def exemplo_uso_simples():
         'acesso_esgoto': 0,
         'recebe_bolsa_familia': 1
     })
-    
+
     # Inicializar meta-classificador (sem API key para demo)
     meta_classificador = MetaClassificadorLLM()
-    
+
     # Simular predições ML (já que não temos modelos treinados)
     predicoes_simuladas = {
         'random_forest': {
@@ -390,18 +412,18 @@ def exemplo_uso_simples():
             'confianca_maxima': [0.5]
         }
     }
-    
+
     # Gerar prompt para o LLM
     prompt = meta_classificador.gerar_prompt_vulnerabilidade(
-        dados_exemplo.to_dict(), 
+        dados_exemplo.to_dict(),
         predicoes_simuladas
     )
-    
+
     print("Prompt gerado para o LLM:")
     print("=" * 50)
     print(prompt)
     print("=" * 50)
-    
+
     print("\nNOTA: Para usar o LLM completo, configure a variável de ambiente OPENAI_API_KEY")
 
 
