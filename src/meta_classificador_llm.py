@@ -14,15 +14,18 @@ from typing import Dict, List, Any, Optional, Tuple
 import logging
 from pathlib import Path
 
-# OpenAI
+# Carregar variáveis de ambiente do .env
+from dotenv import load_dotenv
+load_dotenv()
+
+# Google Gemini
 try:
-    import openai
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
+    GEMINI_AVAILABLE = False
     logging.warning(
-        "OpenAI não está instalado. Funcionalidades de LLM não estarão disponíveis.")
+        "Google Generative AI não está instalado. Funcionalidades de LLM não estarão disponíveis.")
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -33,33 +36,35 @@ class MetaClassificadorLLM:
     """
     Meta-classificador que combina modelos ML tradicionais com LLM para
     análise mais interpretável de vulnerabilidade social.
+    Usa Google Gemini API (gratuita).
     """
 
     def __init__(
             self,
             api_key: Optional[str] = None,
-            modelo_llm: str = "gpt-3.5-turbo"):
+            modelo_llm: str = "gemini-2.0-flash"):
         """
         Inicializa o meta-classificador.
 
         Args:
-            api_key (str, optional): Chave da API OpenAI. Se None, tentará obter de variável de ambiente.
-            modelo_llm (str): Modelo do LLM a ser usado
+            api_key (str, optional): Chave da API Gemini. Se None, tentará obter de variável de ambiente.
+            modelo_llm (str): Modelo do LLM a ser usado (gemini-1.5-flash, gemini-1.5-pro, gemini-pro)
         """
         self.modelo_llm = modelo_llm
-        self.client = None
+        self.model = None
         self.modelos_ml = {}
         self.historico_predicoes = []
 
-        # Configurar cliente OpenAI
-        if OPENAI_AVAILABLE:
-            api_key = api_key or os.getenv('OPENAI_API_KEY')
+        # Configurar cliente Gemini
+        if GEMINI_AVAILABLE:
+            api_key = api_key or os.getenv('GEMINI_API_KEY')
             if api_key:
-                self.client = OpenAI(api_key=api_key)
-                logger.info("Cliente OpenAI configurado com sucesso")
+                genai.configure(api_key=api_key)
+                self.model = genai.GenerativeModel(modelo_llm)
+                logger.info(f"Google Gemini configurado com sucesso (modelo: {modelo_llm})")
             else:
                 logger.warning(
-                    "Chave da API OpenAI não encontrada. Defina OPENAI_API_KEY como variável de ambiente.")
+                    "Chave da API Gemini não encontrada. Defina GEMINI_API_KEY como variável de ambiente.")
 
     def carregar_modelos_ml(self, pasta_modelos: str = "outputs/modelos"):
         """
@@ -74,51 +79,79 @@ class MetaClassificadorLLM:
             # Carregar Random Forest
             rf_path = f"{pasta_modelos}/random_forest_vulnerabilidade.pkl"
             if Path(rf_path).exists():
-                self.modelos_ml['random_forest'] = joblib.load(rf_path)
+                modelo_data = joblib.load(rf_path)
+                # Extrair apenas o modelo e scaler do dict carregado
+                self.modelos_ml['random_forest'] = {
+                    'modelo': modelo_data['modelo'],
+                    'scaler': modelo_data['scaler']
+                }
                 logger.info("Modelo Random Forest carregado")
 
             # Carregar XGBoost
             xgb_path = f"{pasta_modelos}/xgboost_vulnerabilidade.pkl"
             if Path(xgb_path).exists():
-                self.modelos_ml['xgboost'] = joblib.load(xgb_path)
+                modelo_data = joblib.load(xgb_path)
+                # Extrair apenas o modelo e scaler do dict carregado
+                self.modelos_ml['xgboost'] = {
+                    'modelo': modelo_data['modelo'],
+                    'scaler': modelo_data['scaler']
+                }
                 logger.info("Modelo XGBoost carregado")
 
         except Exception as e:
             logger.error(f"Erro ao carregar modelos ML: {e}")
 
-    def predizer_modelos_ml(self, X: pd.DataFrame) -> Dict[str, Any]:
+    def predizer_modelos_ml(self, X: pd.DataFrame) -> Dict[str, Dict]:
         """
-        Faz predições usando modelos ML carregados.
-
+        Faz predições com os modelos ML carregados.
+        
         Args:
-            X (pd.DataFrame): Features de entrada
-
+            X: DataFrame com features
+            
         Returns:
-            Dict[str, Any]: Predições e probabilidades dos modelos
+            Dicionário com predições de cada modelo
         """
+        if not self.modelos_ml:
+            raise ValueError("Modelos ML não foram carregados. Execute carregar_modelos_ml() primeiro.")
+        
+        # Features esperadas pelos modelos (mesmo do treinamento)
+        features_esperadas = [
+            'idade', 'escolaridade', 'renda_per_capita', 'qtd_pessoas_familia',
+            'possui_deficiencia', 'situacao_trabalho', 'tipo_moradia',
+            'acesso_agua', 'acesso_esgoto', 'vulnerabilidade_idade',
+            'infraestrutura_adequada', 'escolaridade_baixa', 
+            'situacao_trabalho_precaria', 'superlotacao', 'recebe_bolsa_familia'
+        ]
+        
+        # Selecionar apenas features necessárias
+        X_pred = X[features_esperadas].copy()
+        
         predicoes = {}
-
-        for nome_modelo, modelo_data in self.modelos_ml.items():
+        
+        for nome_modelo, modelo_dict in self.modelos_ml.items():
             try:
-                modelo = modelo_data['modelo']
-                scaler = modelo_data['scaler']
-
-                # Escalar dados
-                X_scaled = scaler.transform(X)
-
-                # Fazer predições
-                pred_classes = modelo.predict(X_scaled)
-                pred_proba = modelo.predict_proba(X_scaled)
-
+                # Extrair modelo e scaler do dicionário
+                modelo = modelo_dict['modelo']
+                scaler = modelo_dict['scaler']
+                
+                # Escalar features
+                X_scaled = scaler.transform(X_pred)
+                
+                # Fazer predição
+                y_pred = modelo.predict(X_scaled)
+                y_proba = modelo.predict_proba(X_scaled)
+                
+                # Armazenar resultados
                 predicoes[nome_modelo] = {
-                    'classes': pred_classes.tolist(),
-                    'probabilidades': pred_proba.tolist(),
-                    'confianca_maxima': pred_proba.max(axis=1).tolist()
+                    'classes': y_pred,
+                    'probabilidades': y_proba,
+                    'confianca_maxima': y_proba.max(axis=1)
                 }
-
+                
             except Exception as e:
                 logger.error(f"Erro ao fazer predição com {nome_modelo}: {e}")
-
+                continue
+        
         return predicoes
 
     def gerar_prompt_vulnerabilidade(
@@ -210,25 +243,33 @@ Seja específico, prático e considere o contexto socioeconômico brasileiro.
         Returns:
             Optional[str]: Resposta do LLM ou None se erro
         """
-        if not self.client:
-            logger.error("Cliente OpenAI não configurado")
+        if not self.model:
+            logger.error("Google Gemini não configurado")
             return None
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.modelo_llm,
-                messages=[
-                    {"role": "system", "content": "Você é um especialista em vulnerabilidade social e políticas públicas brasileiras."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1500,
-                temperature=0.3
+            # Adicionar contexto de sistema ao prompt
+            prompt_completo = (
+                "Você é um especialista em vulnerabilidade social e políticas públicas brasileiras.\n\n"
+                + prompt
+            )
+            
+            # Configurar geração
+            generation_config = genai.GenerationConfig(
+                temperature=0.3,
+                max_output_tokens=1500,
+            )
+            
+            # Gerar resposta
+            response = self.model.generate_content(
+                prompt_completo,
+                generation_config=generation_config
             )
 
-            return response.choices[0].message.content
+            return response.text
 
         except Exception as e:
-            logger.error(f"Erro ao chamar OpenAI API: {e}")
+            logger.error(f"Erro ao chamar Google Gemini API: {e}")
             return None
 
     def classificar_vulnerabilidade(
@@ -255,12 +296,13 @@ Seja específico, prático e considere o contexto socioeconômico brasileiro.
         prompt = self.gerar_prompt_vulnerabilidade(dados_dict, predicoes_ml)
         analise_llm = self.analisar_com_llm(prompt)
 
-        # Consolidar resultado
+            # Consolidar resultado
         resultado = {
             'dados_pessoa': dados_dict,
             'predicoes_ml': predicoes_ml,
             'analise_llm': analise_llm,
             'prompt_usado': prompt,
+            'modelo_usado': self.modelo_llm,
             'timestamp': pd.Timestamp.now().isoformat()
         }
 
@@ -376,7 +418,7 @@ Seja específico, prático e considere o contexto socioeconômico brasileiro.
 
 def exemplo_uso_simples():
     """
-    Exemplo simples de uso do meta-classificador (sem OpenAI).
+    Exemplo simples de uso do meta-classificador (sem API key).
     """
     print("=== Exemplo de Uso do Meta-Classificador (Modo Simulação) ===")
 
@@ -424,7 +466,8 @@ def exemplo_uso_simples():
     print(prompt)
     print("=" * 50)
 
-    print("\nNOTA: Para usar o LLM completo, configure a variável de ambiente OPENAI_API_KEY")
+    print("\nNOTA: Para usar o LLM completo, configure a variável de ambiente GEMINI_API_KEY")
+    print("Obtenha gratuitamente em: https://makersuite.google.com/app/apikey")
 
 
 if __name__ == "__main__":

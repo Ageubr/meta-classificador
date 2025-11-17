@@ -16,6 +16,8 @@ from datetime import datetime
 # Imports terceiros
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import pandas as pd
 import joblib
@@ -127,19 +129,24 @@ async def startup_event():
 
     try:
         # Carregar modelos treinados
-        modelos_dir = Path(__file__).parent.parent / "outputs"
+        modelos_dir = Path(__file__).parent.parent / "outputs" / "modelos"
 
-        rf_path = modelos_dir / "modelo_rf.pkl"
-        xgb_path = modelos_dir / "modelo_xgb.pkl"
+        rf_path = modelos_dir / "random_forest_vulnerabilidade.pkl"
+        xgb_path = modelos_dir / "xgboost_vulnerabilidade.pkl"
 
         if rf_path.exists():
-            rf_model = joblib.load(rf_path)
+            rf_data = joblib.load(rf_path)
+            rf_model = rf_data['modelo']
+            feature_names = rf_data.get('features', None)
             logger.info("Modelo Random Forest carregado com sucesso")
         else:
             logger.warning("Modelo RF não encontrado em %s", rf_path)
 
         if xgb_path.exists():
-            xgb_model = joblib.load(xgb_path)
+            xgb_data = joblib.load(xgb_path)
+            xgb_model = xgb_data['modelo']
+            if not feature_names:
+                feature_names = xgb_data.get('features', None)
             logger.info("Modelo XGBoost carregado com sucesso")
         else:
             logger.warning("Modelo XGBoost não encontrado em %s", xgb_path)
@@ -158,10 +165,33 @@ async def startup_event():
         ) from e
 
 
+# Montar arquivos estáticos (frontend)
+frontend_path = Path(__file__).parent.parent / "frontend"
+if frontend_path.exists():
+    app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
+    logger.info(f"Frontend montado em /static")
+
+
 # Endpoints
 @app.get("/", tags=["Root"])
 async def root():
-    """Endpoint raiz da API."""
+    """Serve a interface web do sistema."""
+    frontend_file = Path(__file__).parent.parent / "frontend" / "index.html"
+    if frontend_file.exists():
+        return FileResponse(frontend_file)
+    else:
+        return {
+            "mensagem": "API de Análise de Vulnerabilidade Social",
+            "versao": "1.0.0",
+            "documentacao": "/docs",
+            "health": "/health",
+            "interface": "Frontend não encontrado. Acesse /docs para API docs."
+        }
+
+
+@app.get("/api", tags=["Info"])
+async def api_info():
+    """Informações da API."""
     return {
         "mensagem": "API de Análise de Vulnerabilidade Social",
         "versao": "1.0.0",
@@ -231,6 +261,34 @@ async def predict(dados: DadosFamilia):
         # Converter dados para DataFrame
         dados_dict = dados.dict()
         df = pd.DataFrame([dados_dict])
+        
+        # Mapear campos da API para campos esperados pelo preprocessamento
+        df['idade'] = df['idade_responsavel']
+        df['qtd_pessoas_familia'] = df['numero_membros']
+        df['acesso_agua'] = df['possui_agua_encanada'].astype(int)
+        df['acesso_esgoto'] = df['possui_esgoto'].astype(int)
+        df['possui_deficiencia'] = 0  # Usar campo pessoa_deficiencia quando disponível
+        df['tipo_moradia'] = df['material_parede'].map({
+            'Alvenaria': 1,
+            'Madeira': 2,
+            'Taipa': 3,
+            'Outros': 4
+        }).fillna(1)
+        df['escolaridade'] = df['nivel_escolaridade'].map({
+            'Sem Instrução': 0,
+            'Fundamental Incompleto': 1,
+            'Fundamental Completo': 2,
+            'Médio Incompleto': 3,
+            'Médio Completo': 4,
+            'Superior Incompleto': 5,
+            'Superior Completo': 6
+        }).fillna(1)
+        df['situacao_trabalho'] = df['situacao_trabalho'].map({
+            'Desempregado': 0,
+            'Informal': 1,
+            'Formal': 2,
+            'Aposentado': 3
+        }).fillna(0)
 
         # Gerar features de vulnerabilidade
         df = gerar_features_vulnerabilidade(df)
@@ -238,25 +296,32 @@ async def predict(dados: DadosFamilia):
         # Preparar dados para ML
         X, _ = preparar_dados_para_ml(df)
 
-        # Predições
-        pred_rf = rf_model.prever(X)[0]
-        pred_xgb = xgb_model.prever(X)[0]
+        # Predições (modelos scikit-learn)
+        pred_rf = rf_model.predict(X)[0]
+        pred_xgb = xgb_model.predict(X)[0]
 
         # Probabilidades
-        prob_rf = rf_model.prever_probabilidade(X)[0]
-        prob_xgb = xgb_model.prever_probabilidade(X)[0]
+        prob_rf = rf_model.predict_proba(X)[0]
+        prob_xgb = xgb_model.predict_proba(X)[0]
+        
+        # Mapear números para classes
+        classes = {0: "Baixa", 1: "Média", 2: "Alta"}
+        pred_rf_label = classes[pred_rf]
+        pred_xgb_label = classes[pred_xgb]
 
         # Features importantes (top 5)
-        importances_rf = dict(
-            zip(feature_names, rf_model.obter_feature_importance()))
-        importances_rf = dict(
-            sorted(importances_rf.items(),
-                   key=lambda x: x[1], reverse=True)[:5]
-        )
+        if hasattr(rf_model, 'feature_importances_') and feature_names:
+            importances_rf = dict(zip(feature_names, rf_model.feature_importances_))
+            importances_rf = dict(
+                sorted(importances_rf.items(),
+                       key=lambda x: x[1], reverse=True)[:5]
+            )
+        else:
+            importances_rf = {}
 
         return PredictionResponse(
-            vulnerabilidade_rf=pred_rf,
-            vulnerabilidade_xgb=pred_xgb,
+            vulnerabilidade_rf=pred_rf_label,
+            vulnerabilidade_xgb=pred_xgb_label,
             probabilidade_rf={
                 "Baixa": float(prob_rf[0]),
                 "Média": float(prob_rf[1]),
@@ -295,6 +360,34 @@ async def analyze_with_llm(dados: DadosFamilia):
         # Converter dados para DataFrame
         dados_dict = dados.dict()
         df = pd.DataFrame([dados_dict])
+        
+        # Mapear campos da API para campos esperados pelo preprocessamento
+        df['idade'] = df['idade_responsavel']
+        df['qtd_pessoas_familia'] = df['numero_membros']
+        df['acesso_agua'] = df['possui_agua_encanada'].astype(int)
+        df['acesso_esgoto'] = df['possui_esgoto'].astype(int)
+        df['possui_deficiencia'] = 0  # Usar campo pessoa_deficiencia quando disponível
+        df['tipo_moradia'] = df['material_parede'].map({
+            'Alvenaria': 1,
+            'Madeira': 2,
+            'Taipa': 3,
+            'Outros': 4
+        }).fillna(1)
+        df['escolaridade'] = df['nivel_escolaridade'].map({
+            'Sem Instrução': 0,
+            'Fundamental Incompleto': 1,
+            'Fundamental Completo': 2,
+            'Médio Incompleto': 3,
+            'Médio Completo': 4,
+            'Superior Incompleto': 5,
+            'Superior Completo': 6
+        }).fillna(1)
+        df['situacao_trabalho'] = df['situacao_trabalho'].map({
+            'Desempregado': 0,
+            'Informal': 1,
+            'Formal': 2,
+            'Aposentado': 3
+        }).fillna(0)
 
         # Gerar features
         df = gerar_features_vulnerabilidade(df)
@@ -302,22 +395,64 @@ async def analyze_with_llm(dados: DadosFamilia):
         # Preparar dados
         X, _ = preparar_dados_para_ml(df)
 
-        # Predições dos modelos ML
-        pred_rf = rf_model.prever(X)[0]
-        pred_xgb = xgb_model.prever(X)[0]
-        prob_rf = rf_model.prever_probabilidade(X)[0]
-        prob_xgb = xgb_model.prever_probabilidade(X)[0]
+        # Predições dos modelos ML (são modelos scikit-learn diretos)
+        pred_rf = rf_model.predict(X)[0]
+        pred_xgb = xgb_model.predict(X)[0]
+        prob_rf = rf_model.predict_proba(X)[0]
+        prob_xgb = xgb_model.predict_proba(X)[0]
+        
+        # Mapear números para classes
+        classes = {0: "Baixa", 1: "Média", 2: "Alta"}
+        pred_rf_label = classes[pred_rf]
+        pred_xgb_label = classes[pred_xgb]
 
         # Análise com LLM (se disponível)
         analise_llm = None
         if meta_classificador:
-            analise_llm = meta_classificador.analisar_caso(
-                dados_dict, pred_rf, pred_xgb, prob_rf, prob_xgb
-            )
+            # Criar prompt para análise
+            prompt = f"""
+Analise o seguinte caso de vulnerabilidade social:
+
+**Dados da Família:**
+- Idade do responsável: {dados_dict['idade_responsavel']} anos
+- Membros da família: {dados_dict['numero_membros']}
+- Crianças: {dados_dict['criancas']}
+- Idosos: {dados_dict['idosos']}
+- Renda per capita: R$ {dados_dict['renda_per_capita']:.2f}
+- Pessoas trabalhando: {dados_dict['pessoas_trabalhando']}
+
+**Infraestrutura:**
+- Água encanada: {'Sim' if dados_dict['possui_agua_encanada'] else 'Não'}
+- Esgoto: {'Sim' if dados_dict['possui_esgoto'] else 'Não'}
+- Coleta de lixo: {'Sim' if dados_dict['possui_coleta_lixo'] else 'Não'}
+- Energia elétrica: {'Sim' if dados_dict['possui_energia'] else 'Não'}
+- Material da parede: {dados_dict['material_parede']}
+- Material do teto: {dados_dict['material_teto']}
+- Cômodos: {dados_dict['comodos']}
+- Possui banheiro: {'Sim' if dados_dict['possui_banheiro'] else 'Não'}
+
+**Situação Socioeconômica:**
+- Tempo de residência: {dados_dict['tempo_residencia']} meses
+- Recebe Bolsa Família: {'Sim' if dados_dict['recebe_bolsa_familia'] else 'Não'}
+- Valor Bolsa Família: R$ {dados_dict['valor_bolsa_familia']:.2f}
+- Escolaridade: {dados_dict['nivel_escolaridade']}
+- Situação de trabalho: {dados_dict['situacao_trabalho']}
+
+**Predições dos Modelos:**
+- Random Forest: {pred_rf_label} (probabilidades: Baixa={prob_rf[0]:.2%}, Média={prob_rf[1]:.2%}, Alta={prob_rf[2]:.2%})
+- XGBoost: {pred_xgb_label} (probabilidades: Baixa={prob_xgb[0]:.2%}, Média={prob_xgb[1]:.2%}, Alta={prob_xgb[2]:.2%})
+
+Forneça uma análise detalhada identificando:
+1. Principais fatores de vulnerabilidade
+2. Pontos positivos da situação
+3. Recomendações práticas
+4. Classificação final de vulnerabilidade (Baixa/Média/Alta) e justificativa
+"""
+            analise_llm = meta_classificador.analisar_com_llm(prompt)
 
         return {
-            "predicao_rf": pred_rf,
-            "predicao_xgb": pred_xgb,
+            "predicao_rf": pred_rf_label,
+            "predicao_xgb": pred_xgb_label,
             "probabilidades_rf": {
                 "Baixa": float(prob_rf[0]),
                 "Média": float(prob_rf[1]),

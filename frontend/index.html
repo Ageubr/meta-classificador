@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Classificação de Vulnerabilidade Social</title>
+    <link rel="stylesheet" href="/static/styles.css?v=3">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>🏠 Meta-Classificador</h1>
+                <p>Sistema de Análise de Vulnerabilidade Social</p>
+            </div>
+            <div class="status" id="apiStatus">
+                <span class="status-dot"></span>
+                <span class="status-text">Verificando API...</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Form Section -->
+            <section class="card form-section">
+                <h2>📝 Dados da Família</h2>
+                <form id="vulnerabilityForm">
+                    <!-- Dados Pessoais -->
+                    <div class="form-group-title">👥 Composição Familiar</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="idade_responsavel">Idade do Responsável</label>
+                            <input type="number" id="idade_responsavel" name="idade_responsavel" 
+                                   min="18" max="100" required value="35">
+                        </div>
+                        <div class="form-group">
+                            <label for="numero_membros">Número de Membros</label>
+                            <input type="number" id="numero_membros" name="numero_membros" 
+                                   min="1" max="20" required value="4">
+                        </div>
+                        <div class="form-group">
+                            <label for="criancas">Crianças (0-14 anos)</label>
+                            <input type="number" id="criancas" name="criancas" 
+                                   min="0" max="10" required value="2">
+                        </div>
+                        <div class="form-group">
+                            <label for="idosos">Idosos (65+ anos)</label>
+                            <input type="number" id="idosos" name="idosos" 
+                                   min="0" max="10" required value="0">
+                        </div>
+                    </div>
+
+                    <!-- Renda -->
+                    <div class="form-group-title">💰 Renda</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="renda_per_capita">Renda Per Capita (R$)</label>
+                            <input type="number" id="renda_per_capita" name="renda_per_capita" 
+                                   min="0" step="0.01" required value="120.00">
+                        </div>
+                        <div class="form-group">
+                            <label for="pessoas_trabalhando">Pessoas Trabalhando</label>
+                            <input type="number" id="pessoas_trabalhando" name="pessoas_trabalhando" 
+                                   min="0" max="10" required value="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="recebe_bolsa_familia">Recebe Bolsa Família?</label>
+                            <select id="recebe_bolsa_familia" name="recebe_bolsa_familia" required>
+                                <option value="true" selected>Sim</option>
+                                <option value="false">Não</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="valor_bolsa_familia">Valor Bolsa Família (R$)</label>
+                            <input type="number" id="valor_bolsa_familia" name="valor_bolsa_familia" 
+                                   min="0" step="0.01" required value="200.00">
+                        </div>
+                    </div>
+
+                    <!-- Infraestrutura -->
+                    <div class="form-group-title">🏘️ Infraestrutura da Moradia</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="possui_agua_encanada" 
+                                       name="possui_agua_encanada" checked>
+                                Água Encanada
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="possui_esgoto" name="possui_esgoto">
+                                Esgoto
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="possui_coleta_lixo" 
+                                       name="possui_coleta_lixo" checked>
+                                Coleta de Lixo
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="possui_energia" 
+                                       name="possui_energia" checked>
+                                Energia Elétrica
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="material_parede">Material da Parede</label>
+                            <select id="material_parede" name="material_parede" required>
+                                <option value="Alvenaria">Alvenaria</option>
+                                <option value="Madeira" selected>Madeira</option>
+                                <option value="Taipa">Taipa</option>
+                                <option value="Outros">Outros</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="material_teto">Material do Teto</label>
+                            <select id="material_teto" name="material_teto" required>
+                                <option value="Telha" selected>Telha</option>
+                                <option value="Laje">Laje</option>
+                                <option value="Zinco">Zinco</option>
+                                <option value="Outros">Outros</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="comodos">Número de Cômodos</label>
+                            <input type="number" id="comodos" name="comodos" 
+                                   min="1" max="20" required value="3">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="possui_banheiro" 
+                                       name="possui_banheiro" checked>
+                                Possui Banheiro
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Outros -->
+                    <div class="form-group-title">📚 Outros Dados</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="tempo_residencia">Tempo de Residência (meses)</label>
+                            <input type="number" id="tempo_residencia" name="tempo_residencia" 
+                                   min="0" required value="18">
+                        </div>
+                        <div class="form-group">
+                            <label for="nivel_escolaridade">Escolaridade</label>
+                            <select id="nivel_escolaridade" name="nivel_escolaridade" required>
+                                <option value="Sem Instrução">Sem Instrução</option>
+                                <option value="Fundamental Incompleto">Fundamental Incompleto</option>
+                                <option value="Fundamental Completo">Fundamental Completo</option>
+                                <option value="Ensino Médio" selected>Ensino Médio</option>
+                                <option value="Superior">Superior</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="situacao_trabalho">Situação de Trabalho</label>
+                            <select id="situacao_trabalho" name="situacao_trabalho" required>
+                                <option value="Desempregado">Desempregado</option>
+                                <option value="Empregado Informal" selected>Empregado Informal</option>
+                                <option value="Empregado Formal">Empregado Formal</option>
+                                <option value="Aposentado">Aposentado</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="button-group">
+                        <button type="submit" class="btn btn-primary" id="predictBtn">
+                            🤖 Analisar Vulnerabilidade
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="analyzeLLMBtn">
+                            🧠 Análise com IA (LLM)
+                        </button>
+                        <button type="reset" class="btn btn-reset">
+                            🔄 Limpar
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Results Section -->
+            <section class="card results-section" id="resultsSection" style="display: none;">
+                <h2>📊 Resultados da Análise</h2>
+                <div id="resultsContent"></div>
+            </section>
+
+            <!-- LLM Analysis Section -->
+            <section class="card llm-section" id="llmSection" style="display: none;">
+                <h2>🧠 Análise Qualitativa (IA)</h2>
+                <div id="llmContent" class="llm-content"></div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Sistema de Meta-Classificação de Vulnerabilidade Social | 
+               <a href="/docs" target="_blank">Documentação</a> | 
+               <a href="https://github.com/Ageubr/meta-classificador" target="_blank">GitHub</a>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <p id="loadingText">Processando análise...</p>
+    </div>
+
+    <script src="/static/script.js?v=7"></script>
+</body>
+</html>

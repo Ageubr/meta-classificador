@@ -1,0 +1,71 @@
+# Arquivos Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Ambientes virtuais
+venv/
+env/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# ⚠️ IMPORTANTE: Variáveis de ambiente e credenciais
+.env
+
+# Dados grandes (não versionar arquivos > 100MB)
+data/base_amostra_cad_201812/
+data/bolsa_familia.csv/
+data/cadunico.csv/
+*.csv
+!data/cadunico_processado_100000.csv
+*.zip
+*.gz
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# Logs
+*.log
+
+# Dados sensíveis (descomente se necessário)
+# data/*.csv
+# outputs/

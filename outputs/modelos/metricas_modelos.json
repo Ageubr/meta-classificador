@@ -1,0 +1,197 @@
+{
+  "random_forest": {
+    "acuracia_treino": 1.0,
+    "acuracia_teste": 0.9872611464968153,
+    "relatorio_classificacao": {
+      "0": {
+        "precision": 1.0,
+        "recall": 0.5714285714285714,
+        "f1-score": 0.7272727272727273,
+        "support": 7.0
+      },
+      "1": {
+        "precision": 0.95,
+        "recall": 0.9743589743589743,
+        "f1-score": 0.9620253164556962,
+        "support": 39.0
+      },
+      "2": {
+        "precision": 0.9821428571428571,
+        "recall": 0.9939759036144579,
+        "f1-score": 0.9880239520958084,
+        "support": 166.0
+      },
+      "3": {
+        "precision": 0.9961389961389961,
+        "recall": 0.9961389961389961,
+        "f1-score": 0.9961389961389961,
+        "support": 259.0
+      },
+      "accuracy": 0.9872611464968153,
+      "macro avg": {
+        "precision": 0.9820704633204633,
+        "recall": 0.8839756113852499,
+        "f1-score": 0.9183652479908071,
+        "support": 471.0
+      },
+      "weighted avg": {
+        "precision": 0.9874431301182893,
+        "recall": 0.9872611464968153,
+        "f1-score": 0.9864583279842579,
+        "support": 471.0
+      }
+    },
+    "matriz_confusao": [
+      [
+        4,
+        2,
+        1,
+        0
+      ],
+      [
+        0,
+        38,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        165,
+        1
+      ],
+      [
+        0,
+        0,
+        1,
+        258
+      ]
+    ],
+    "importancia_features": {
+      "idade": 0.06574635573090803,
+      "escolaridade": 0.004232608749918245,
+      "renda_per_capita": 0.36910266140930925,
+      "qtd_pessoas_familia": 0.0833940475218068,
+      "possui_deficiencia": 0.022763629609004056,
+      "situacao_trabalho": 0.007469227483638352,
+      "tipo_moradia": 0.0036236008131291394,
+      "acesso_agua": 0.02730129432862296,
+      "acesso_esgoto": 0.13623435102472273,
+      "vulnerabilidade_idade": 0.02101090442669034,
+      "infraestrutura_adequada": 0.18307262038228625,
+      "escolaridade_baixa": 0.0026762448993973096,
+      "situacao_trabalho_precaria": 0.0,
+      "superlotacao": 0.01689739217590193,
+      "recebe_bolsa_familia": 0.056475061444664666
+    },
+    "validacao_cruzada": {
+      "scores": [
+        0.9708222811671088,
+        0.9787798408488063,
+        0.9920424403183024,
+        0.986737400530504,
+        0.9893617021276596
+      ],
+      "media": 0.9835487329984762,
+      "desvio_padrao": 0.007756367491459052
+    }
+  },
+  "xgboost": {
+    "acuracia_treino": 1.0,
+    "acuracia_teste": 0.9915074309978769,
+    "relatorio_classificacao": {
+      "0": {
+        "precision": 0.7777777777777778,
+        "recall": 1.0,
+        "f1-score": 0.875,
+        "support": 7.0
+      },
+      "1": {
+        "precision": 1.0,
+        "recall": 0.9230769230769231,
+        "f1-score": 0.96,
+        "support": 39.0
+      },
+      "2": {
+        "precision": 0.9880952380952381,
+        "recall": 1.0,
+        "f1-score": 0.9940119760479041,
+        "support": 166.0
+      },
+      "3": {
+        "precision": 1.0,
+        "recall": 0.9961389961389961,
+        "f1-score": 0.9980657640232108,
+        "support": 259.0
+      },
+      "accuracy": 0.9915074309978769,
+      "macro avg": {
+        "precision": 0.941468253968254,
+        "recall": 0.9798039798039799,
+        "f1-score": 0.9567694350177788,
+        "support": 471.0
+      },
+      "weighted avg": {
+        "precision": 0.9925016007818556,
+        "recall": 0.9915074309978769,
+        "f1-score": 0.9916560953417488,
+        "support": 471.0
+      }
+    },
+    "matriz_confusao": [
+      [
+        7,
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        36,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        166,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        258
+      ]
+    ],
+    "importancia_features": {
+      "idade": "0.011314343",
+      "escolaridade": "0.031941406",
+      "renda_per_capita": "0.2869129",
+      "qtd_pessoas_familia": "0.07901841",
+      "possui_deficiencia": "0.032805614",
+      "situacao_trabalho": "0.008260051",
+      "tipo_moradia": "0.0",
+      "acesso_agua": "0.0066316654",
+      "acesso_esgoto": "0.015681932",
+      "vulnerabilidade_idade": "0.045376483",
+      "infraestrutura_adequada": "0.47760177",
+      "escolaridade_baixa": "0.0",
+      "situacao_trabalho_precaria": "0.0",
+      "superlotacao": "0.0",
+      "recebe_bolsa_familia": "0.0044554723"
+    },
+    "validacao_cruzada": {
+      "scores": [
+        0.9840848806366048,
+        0.9840848806366048,
+        0.9893899204244032,
+        0.986737400530504,
+        0.9920212765957447
+      ],
+      "media": 0.9872636717647723,
+      "desvio_padrao": 0.0030868146875160777
+    }
+  },
+  "data_treinamento": "2025-11-13T12:27:36.996630"
+}
