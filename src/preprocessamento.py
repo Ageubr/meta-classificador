@@ -263,8 +263,9 @@ def gerar_features_vulnerabilidade(
             if feature == 'renda_per_capita':
                 score_vulnerabilidade += peso * \
                     df_features['renda_per_capita_norm']
-            else:
+            elif feature in df_features.columns:  # Verificar se coluna existe
                 score_vulnerabilidade += peso * df_features[feature]
+            # Se a coluna não existe, simplesmente ignora (não adiciona ao score)
 
         df_features['score_vulnerabilidade'] = score_vulnerabilidade
 
@@ -333,6 +334,13 @@ def preparar_dados_para_ml(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     if 'recebe_bolsa_familia' in df.columns:
         features_numericas.append('recebe_bolsa_familia')
 
+    # Verificar se todas as features existem
+    features_faltantes = [f for f in features_numericas if f not in df.columns]
+    if features_faltantes:
+        logger.error(f"ERRO: Features obrigatórias faltando: {features_faltantes}")
+        logger.error(f"Colunas disponíveis: {df.columns.tolist()}")
+        raise ValueError(f"Features obrigatórias faltando: {features_faltantes}")
+    
     X = df[features_numericas].copy()
 
     # Target: nível de vulnerabilidade (convertido para numérico)

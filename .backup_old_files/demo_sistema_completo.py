@@ -122,14 +122,14 @@ def main():
     # ========== PARTE 4: META-CLASSIFICADOR LLM ==========
     print_secao("🧠 PARTE 4: META-CLASSIFICADOR COM LLM")
     
-    from meta_classificador_llm import MetaClassificadorLLM
+    from meta_classificador_llm import MetaClassificadorLLM, GEMINI_AVAILABLE
     import pandas as pd
     
-    print("Inicializando Meta-Classificador com integração ChatGPT...")
+    print("Inicializando Meta-Classificador com integração LLM (Google Gemini)...")
     meta = MetaClassificadorLLM()
     
-    api_key_configurada = meta.client is not None
-    print(f"✓ OpenAI instalado: Sim (versão 2.7.1)")
+    api_key_configurada = meta.model is not None
+    print(f"✓ Google Gemini instalado: {'Sim' if GEMINI_AVAILABLE else 'Não'}")
     print(f"✓ API Key configurada: {'Sim ✅' if api_key_configurada else 'Não ⚠️'}")
     print(f"✓ Modelo LLM: {meta.modelo_llm}")
     
@@ -151,19 +151,19 @@ def main():
     print("\n📝 Gerando prompt para análise LLM...")
     prompt = meta.gerar_prompt_vulnerabilidade(pessoa.to_dict(), predicoes)
     print(f"✓ Prompt gerado com {len(prompt)} caracteres")
-    print(f"\nPreview do prompt enviado ao ChatGPT:")
+    print(f"\nPreview do prompt enviado ao LLM:")
     print("-" * 70)
     print(prompt[:500] + "...")
     print("-" * 70)
     
     if api_key_configurada:
-        print("\n✅ Sistema PRONTO para análise completa com ChatGPT!")
+        print("\n✅ Sistema PRONTO para análise completa com LLM (Google Gemini)!")
         print("   Exemplo de uso:")
         print("   >>> resultado = meta.classificar_vulnerabilidade(pessoa)")
         print("   >>> print(resultado['analise_llm'])")
     else:
         print("\n⚠️  Para habilitar análise LLM, configure:")
-        print("   export OPENAI_API_KEY='sua-chave-aqui'")
+        print("   export GEMINI_API_KEY='sua-chave-aqui'")
     
     # ========== PARTE 5: API REST ==========
     print_secao("🌐 PARTE 5: API REST")

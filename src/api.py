@@ -189,6 +189,19 @@ async def root():
         }
 
 
+@app.get("/data-viewer.html", tags=["Root"])
+async def data_viewer():
+    """Serve a página de visualização de dados."""
+    viewer_file = Path(__file__).parent.parent / "frontend" / "data-viewer.html"
+    if viewer_file.exists():
+        return FileResponse(viewer_file)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Página de visualização não encontrada"
+        )
+
+
 @app.get("/api", tags=["Info"])
 async def api_info():
     """Informações da API."""
@@ -552,6 +565,447 @@ async def obter_estatisticas():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao obter estatísticas: {str(e)}"
         ) from e
+
+
+# ============================================================================
+# ENDPOINTS PARA PROCESSAMENTO DE DADOS EM LOTE (CSVs da pasta data/)
+# ============================================================================
+
+@app.get("/data/files", tags=["Data Processing"])
+async def listar_arquivos_csv():
+    """
+    Lista todos os arquivos CSV disponíveis na pasta data/.
+    Retorna informações sobre cada arquivo incluindo tamanho e número de linhas.
+    """
+    try:
+        data_path = Path("data")
+        if not data_path.exists():
+            return {"arquivos": [], "total": 0}
+        
+        arquivos = []
+        for file_path in data_path.rglob("*.csv"):
+            try:
+                # Obter informações do arquivo
+                size_mb = file_path.stat().st_size / (1024 * 1024)
+                
+                # Ler primeiras linhas para contar
+                df_sample = pd.read_csv(file_path, nrows=1)
+                total_lines = sum(1 for _ in open(file_path, encoding='utf-8', errors='ignore')) - 1
+                
+                arquivos.append({
+                    "nome": file_path.name,
+                    "caminho_relativo": str(file_path.relative_to(data_path)),
+                    "tamanho_mb": round(size_mb, 2),
+                    "linhas": total_lines,
+                    "colunas": len(df_sample.columns)
+                })
+            except Exception as e:
+                logger.warning(f"Erro ao processar arquivo {file_path}: {e}")
+                continue
+        
+        return {
+            "arquivos": sorted(arquivos, key=lambda x: x["linhas"], reverse=True),
+            "total": len(arquivos),
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"Erro ao listar arquivos: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao listar arquivos: {str(e)}"
+        )
+
+
+@app.get("/data/process/", tags=["Data Processing"])
+async def processar_csv(filepath: str, max_rows: Optional[int] = None):
+    """
+    Processa um arquivo CSV da pasta data/ e retorna análise completa.
+    Aplica os modelos ML em todos os registros e gera estatísticas.
+    
+    Args:
+        filepath: Caminho relativo do arquivo (ex: base_amostra_cad_201812/base_amostra_familia_201812.csv)
+        max_rows: Limitar número de linhas processadas (opcional)
+    """
+    if rf_model is None or xgb_model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Modelos não estão carregados"
+        )
+    
+    try:
+        # Construir caminho completo
+        data_path = Path("data")
+        file_path = data_path / filepath
+        
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Arquivo {filepath} não encontrado em data/"
+            )
+        
+        # Carregar dados
+        logger.info(f"Carregando arquivo: {file_path}")
+        if max_rows:
+            df = pd.read_csv(file_path, nrows=max_rows, encoding='utf-8')
+        else:
+            df = pd.read_csv(file_path, encoding='utf-8')
+        
+        logger.info(f"Dados carregados: {len(df)} registros")
+        
+        # Gerar features de vulnerabilidade ANTES de preparar para ML
+        from preprocessamento import gerar_features_vulnerabilidade
+        df = gerar_features_vulnerabilidade(df)
+        
+        # Preparar dados para ML
+        X, _ = preparar_dados_para_ml(df)
+        
+        # Fazer predições
+        logger.info("Fazendo predições...")
+        predicoes_rf = rf_model.predict(X)
+        predicoes_xgb = xgb_model.predict(X)
+        
+        # Adicionar predições ao DataFrame
+        df['predicao_rf'] = predicoes_rf
+        df['predicao_xgb'] = predicoes_xgb
+        
+        # Calcular estatísticas gerais
+        stats = {
+            "total_registros": len(df),
+            "distribuicao_rf": df['predicao_rf'].value_counts().to_dict(),
+            "distribuicao_xgb": df['predicao_xgb'].value_counts().to_dict(),
+            "estatisticas_gerais": {
+                "idade_media": float(df['idade'].mean()) if 'idade' in df.columns else None,
+                "renda_per_capita_media": float(df['renda_per_capita'].mean()) if 'renda_per_capita' in df.columns else None,
+                "tamanho_familia_medio": float(df['qtd_pessoas_familia'].mean()) if 'qtd_pessoas_familia' in df.columns else None,
+                "recebem_bolsa_familia": int(df['recebe_bolsa_familia'].sum()) if 'recebe_bolsa_familia' in df.columns else None,
+                "percentual_bolsa_familia": float(df['recebe_bolsa_familia'].mean() * 100) if 'recebe_bolsa_familia' in df.columns else None
+            }
+        }
+        
+        return {
+            "arquivo": filepath,
+            "processado_em": datetime.now().isoformat(),
+            "estatisticas": stats
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar CSV: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao processar arquivo: {str(e)}"
+        )
+
+
+@app.get("/data/analyze-municipality", tags=["Data Processing"])
+async def analisar_por_municipio(filepath: str, max_rows: Optional[int] = None):
+    """
+    Analisa dados agregados por município com classificação ML e análise LLM.
+    Retorna estatísticas detalhadas por município e análise interpretativa da IA.
+    
+    Args:
+        filepath: Caminho relativo do arquivo CSV para analisar
+        max_rows: Limitar número de linhas (opcional)
+    """
+    if rf_model is None or xgb_model is None or meta_classificador is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Modelos não estão carregados"
+        )
+    
+    try:
+        # Construir caminho completo
+        data_path = Path("data")
+        file_path = data_path / filepath
+        
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Arquivo {filepath} não encontrado em data/"
+            )
+        
+        logger.info(f"Carregando arquivo: {file_path}")
+        if max_rows:
+            df = pd.read_csv(file_path, nrows=max_rows, encoding='utf-8')
+        else:
+            df = pd.read_csv(file_path, encoding='utf-8')
+        
+        # Verificar se tem coluna de município
+        if 'cod_municipio' not in df.columns:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Arquivo não contém coluna 'cod_municipio'"
+            )
+        
+        # Gerar features de vulnerabilidade ANTES de preparar para ML
+        from preprocessamento import gerar_features_vulnerabilidade
+        df = gerar_features_vulnerabilidade(df)
+        
+        # Preparar dados e fazer predições
+        X, _ = preparar_dados_para_ml(df)
+        
+        # Fazer predições (retornam números: 0=Baixa, 1=Média, 2=Alta, 3=Muito Alta)
+        pred_rf_numeric = rf_model.predict(X)
+        pred_xgb_numeric = xgb_model.predict(X)
+        
+        # Mapear números para strings
+        vulnerabilidade_map = {0: 'Baixa', 1: 'Média', 2: 'Alta', 3: 'Muito Alta'}
+        df['predicao_rf'] = pd.Series(pred_rf_numeric).map(vulnerabilidade_map).values
+        df['predicao_xgb'] = pd.Series(pred_xgb_numeric).map(vulnerabilidade_map).values
+        
+        # Agregar por município
+        municipios = []
+        
+        for cod_mun, grupo in df.groupby('cod_municipio'):
+            mun_stats = {
+                "codigo_municipio": int(cod_mun),
+                "nome_municipio": f"Município {cod_mun}",
+                "total_familias": len(grupo),
+                "vulnerabilidade": {
+                    "Baixa": int((grupo['predicao_rf'] == 'Baixa').sum()),
+                    "Média": int((grupo['predicao_rf'] == 'Média').sum()),
+                    "Alta": int((grupo['predicao_rf'] == 'Alta').sum()),
+                    "Muito Alta": int((grupo['predicao_rf'] == 'Muito Alta').sum())
+                },
+                "indicadores": {
+                    "idade_media": float(grupo['idade'].mean()),
+                    "renda_per_capita_media": float(grupo['renda_per_capita'].mean()),
+                    "tamanho_familia_medio": float(grupo['qtd_pessoas_familia'].mean()),
+                    "percentual_bolsa_familia": float(grupo['recebe_bolsa_familia'].mean() * 100),
+                    "total_bolsa_familia": int(grupo['recebe_bolsa_familia'].sum())
+                }
+            }
+            
+            # Calcular percentuais
+            mun_stats["vulnerabilidade_percentual"] = {
+                k: round(v / len(grupo) * 100, 1) 
+                for k, v in mun_stats["vulnerabilidade"].items()
+            }
+            
+            municipios.append(mun_stats)
+        
+        # Ordenar por total de famílias
+        municipios.sort(key=lambda x: x['total_familias'], reverse=True)
+        
+        # Gerar análise LLM dos dados agregados
+        logger.info("Gerando análise LLM dos dados municipais...")
+        analise_llm = await gerar_analise_llm_municipios(municipios, len(df))
+        
+        return {
+            "arquivo": filepath,
+            "total_registros": len(df),
+            "total_municipios": len(municipios),
+            "municipios": municipios,
+            "analise_llm": analise_llm,
+            "processado_em": datetime.now().isoformat()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao analisar por município: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao analisar dados: {str(e)}"
+        )
+
+
+@app.get("/data/analyze-governo", tags=["Data Processing"])
+async def analisar_arquivo_governo(filepath: str, max_rows: Optional[int] = 20000):
+    """
+    Analisa arquivos do governo (CadÚnico) DIRETAMENTE sem conversão.
+    Detecta automaticamente o formato, mapeia colunas e processa.
+    
+    Args:
+        filepath: Caminho relativo do arquivo (ex: base_amostra_cad_201812/base_amostra_familia_201812.csv)
+        max_rows: Limite de linhas (padrão 20000 - ideal para análise representativa)
+    """
+    if rf_model is None or xgb_model is None or meta_classificador is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Modelos não estão carregados"
+        )
+    
+    try:
+        from mapeador_governo import carregar_e_mapear_arquivo
+        
+        # Construir caminho
+        data_path = Path("data")
+        file_path = data_path / filepath
+        
+        if not file_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Arquivo {filepath} não encontrado"
+            )
+        
+        # Carregar e mapear automaticamente
+        logger.info(f"Processando arquivo do governo: {file_path}")
+        df_mapped, info = carregar_e_mapear_arquivo(file_path, max_rows=max_rows)
+        
+        logger.info(f"Arquivo mapeado: {len(df_mapped)} registros, tipo: {info['tipo']}")
+        
+        # Adicionar valores padrão para colunas obrigatórias faltantes
+        colunas_obrigatorias = {
+            'idade': 35,
+            'sexo': 'M',
+            'escolaridade': 1,
+            'qtd_pessoas_familia': 4,
+            'renda_per_capita': 0,
+            'situacao_trabalho': 0,
+            'acesso_agua': 0,
+            'acesso_esgoto': 0,
+            'recebe_bolsa_familia': 0,
+            'possui_deficiencia': 0,  # Não possui deficiência por padrão
+            'tipo_moradia': 1,  # Moradia tipo 1 (alvenaria) por padrão
+        }
+        
+        for col, valor_padrao in colunas_obrigatorias.items():
+            if col not in df_mapped.columns:
+                df_mapped[col] = valor_padrao
+                logger.info(f"Adicionada coluna '{col}' com valor padrão: {valor_padrao}")
+        
+        # Se não tem cod_municipio, usar um valor padrão
+        if 'cod_municipio' not in df_mapped.columns:
+            df_mapped['cod_municipio'] = 999999
+            logger.warning("Coluna 'cod_municipio' não encontrada, usando valor padrão")
+        
+        # Gerar features de vulnerabilidade
+        from preprocessamento import gerar_features_vulnerabilidade
+        df_mapped = gerar_features_vulnerabilidade(df_mapped)
+        
+        # Preparar dados e fazer predições
+        X, _ = preparar_dados_para_ml(df_mapped)
+        
+        # Fazer predições (retornam números: 0=Baixa, 1=Média, 2=Alta, 3=Muito Alta)
+        pred_rf_numeric = rf_model.predict(X)
+        pred_xgb_numeric = xgb_model.predict(X)
+        
+        # Mapear números para strings
+        vulnerabilidade_map = {0: 'Baixa', 1: 'Média', 2: 'Alta', 3: 'Muito Alta'}
+        df_mapped['predicao_rf'] = pd.Series(pred_rf_numeric).map(vulnerabilidade_map).values
+        df_mapped['predicao_xgb'] = pd.Series(pred_xgb_numeric).map(vulnerabilidade_map).values
+        
+        # Agregar por município
+        municipios = []
+        
+        for cod_mun, grupo in df_mapped.groupby('cod_municipio'):
+            mun_stats = {
+                "codigo_municipio": int(cod_mun),
+                "nome_municipio": f"Município {cod_mun}",
+                "total_familias": len(grupo),
+                "vulnerabilidade": {
+                    "Baixa": int((grupo['predicao_rf'] == 'Baixa').sum()),
+                    "Média": int((grupo['predicao_rf'] == 'Média').sum()),
+                    "Alta": int((grupo['predicao_rf'] == 'Alta').sum()),
+                    "Muito Alta": int((grupo['predicao_rf'] == 'Muito Alta').sum())
+                },
+                "indicadores": {
+                    "idade_media": float(grupo['idade'].mean()),
+                    "renda_per_capita_media": float(grupo['renda_per_capita'].mean()),
+                    "tamanho_familia_medio": float(grupo['qtd_pessoas_familia'].mean()),
+                    "percentual_bolsa_familia": float(grupo['recebe_bolsa_familia'].mean() * 100),
+                    "total_bolsa_familia": int(grupo['recebe_bolsa_familia'].sum())
+                }
+            }
+            
+            # Calcular percentuais
+            mun_stats["vulnerabilidade_percentual"] = {
+                k: round(v / len(grupo) * 100, 1) 
+                for k, v in mun_stats["vulnerabilidade"].items()
+            }
+            
+            municipios.append(mun_stats)
+        
+        # Ordenar por total de famílias
+        municipios.sort(key=lambda x: x['total_familias'], reverse=True)
+        
+        # Gerar análise com LLM
+        analise_llm = await gerar_analise_llm_municipios(municipios, len(df_mapped))
+        
+        return {
+            "arquivo_original": filepath,
+            "tipo_detectado": info['tipo'],
+            "formato_detectado": {
+                "separador": info['separador'],
+                "encoding": info['encoding']
+            },
+            "colunas_originais": len(info['colunas']),
+            "total_registros": len(df_mapped),
+            "total_municipios": len(municipios),
+            "municipios": municipios,
+            "analise_ia": analise_llm,
+            "processado_em": datetime.now().isoformat()
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar arquivo do governo: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro: {str(e)}"
+        )
+
+
+async def gerar_analise_llm_municipios(municipios: List[Dict], total_registros: int) -> str:
+    """
+    Gera análise interpretativa dos dados municipais usando LLM.
+    """
+    try:
+        # Pegar top 5 municípios
+        top_municipios = municipios[:5]
+        
+        # Criar prompt para análise
+        prompt = f"""
+Você é um especialista em análise de políticas públicas e vulnerabilidade social.
+Analise os dados agregados de {len(municipios)} municípios brasileiros, totalizando {total_registros} famílias cadastradas no CadÚnico.
+
+DADOS DOS TOP 5 MUNICÍPIOS (por número de famílias):
+
+"""
+        
+        for i, mun in enumerate(top_municipios, 1):
+            prompt += f"""
+{i}. Município {mun['codigo_municipio']}:
+   - Total de famílias: {mun['total_familias']}
+   - Distribuição de vulnerabilidade:
+     * Muito Alta: {mun['vulnerabilidade_percentual']['Muito Alta']}%
+     * Alta: {mun['vulnerabilidade_percentual']['Alta']}%
+     * Média: {mun['vulnerabilidade_percentual']['Média']}%
+     * Baixa: {mun['vulnerabilidade_percentual']['Baixa']}%
+   - Indicadores socioeconômicos:
+     * Renda per capita média: R$ {mun['indicadores']['renda_per_capita_media']:.2f}
+     * Idade média: {mun['indicadores']['idade_media']:.1f} anos
+     * Tamanho médio da família: {mun['indicadores']['tamanho_familia_medio']:.1f} pessoas
+     * Recebem Bolsa Família: {mun['indicadores']['percentual_bolsa_familia']:.1f}%
+
+"""
+        
+        prompt += """
+Por favor, forneça uma análise abrangente contemplando:
+
+1. **Panorama Geral**: Avaliação do nível de vulnerabilidade social observado nos municípios
+2. **Municípios Críticos**: Identificação dos municípios que requerem atenção prioritária
+3. **Indicadores Socioeconômicos**: Análise dos padrões de renda, composição familiar e cobertura do Bolsa Família
+4. **Recomendações**: Sugestões de políticas públicas e ações específicas para cada perfil de município
+5. **Próximos Passos**: Orientações para gestores públicos sobre priorização de recursos
+
+Seja específico, use os dados fornecidos e forneça insights práticos para tomada de decisão.
+"""
+        
+        # Chamar LLM
+        if meta_classificador and meta_classificador.model:
+            response = meta_classificador.model.generate_content(prompt)
+            return response.text
+        else:
+            return "Análise LLM não disponível (API key não configurada)"
+    
+    except Exception as e:
+        logger.error(f"Erro ao gerar análise LLM: {e}")
+        return f"Erro ao gerar análise: {str(e)}"
 
 
 if __name__ == "__main__":

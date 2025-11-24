@@ -81,6 +81,18 @@ Veja a documentação detalhada em [`docs/README.md`](docs/README.md)
 
 Contribuições são bem-vindas! Veja [CONTRIBUTING.md](docs/CONTRIBUTING.md)
 
+## 📁 Estrutura do Projeto
+
+Veja [ESTRUTURA.md](ESTRUTURA.md) para documentação completa da organização do projeto.
+
+## 🛠️ Scripts Úteis
+
+```bash
+./iniciar.sh        # Iniciar sistema (com verificações)
+./status.sh         # Verificar status do sistema
+./limpar_projeto.sh # Limpar cache e temporários
+```
+
 ## 📄 Licença
 
 MIT License - veja [LICENSE](LICENSE)
