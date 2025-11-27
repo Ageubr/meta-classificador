@@ -417,8 +417,3 @@ Estas informações foram fornecidas pela equipe de desenvolvimento e refletem d
   - ✅ Análise individual e em lote por município
   - ✅ Código limpo e documentado
   - ✅ Scripts úteis (`iniciar.sh`, `status.sh`)
-
-Se quiser, posso também:
-- inserir esses detalhes no resumo inicial do README (topo) como bullets rápidos;
-- adicionar um exemplo de `response` do `/predict` com as classes em 4 níveis; ou
-- atualizar `iniciar.sh` para padronizar o uso da variável `GEMINI_API_KEY`.
